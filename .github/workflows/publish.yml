@@ -67,12 +67,67 @@ jobs:
       - name: Run tests
         run: ./gradlew --no-daemon clean test
 
-      - name: Publish to Maven Central
+      - name: Configure Maven Central + signing credentials
         env:
-          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
-          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
-          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_PRIVATE_KEY }}
-          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSPHRASE }}
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          # Trim accidental whitespace/newlines from GitHub secrets (common "Invalid token" cause)
+          USER="$(printf '%s' "$MAVEN_CENTRAL_USERNAME" | tr -d '\r\n' | xargs)"
+          PASS="$(printf '%s' "$MAVEN_CENTRAL_PASSWORD" | tr -d '\r\n' | xargs)"
+          GPG_PASS="$(printf '%s' "$GPG_PASSPHRASE" | tr -d '\r\n')"
+
+          if [[ -z "$USER" || -z "$PASS" ]]; then
+            echo "MAVEN_CENTRAL_USERNAME / MAVEN_CENTRAL_PASSWORD secrets are empty" >&2
+            exit 1
+          fi
+          if [[ -z "$GPG_PRIVATE_KEY" || -z "$GPG_PASS" ]]; then
+            echo "GPG_PRIVATE_KEY / GPG_PASSPHRASE secrets are empty" >&2
+            exit 1
+          fi
+
+          echo "mavenCentralUsername length=${#USER}"
+          echo "mavenCentralPassword length=${#PASS}"
+          echo "GPG private key lines=$(printf '%s\n' "$GPG_PRIVATE_KEY" | wc -l)"
+
+          # Probe Central Portal token before Gradle upload
+          code=$(curl -sS -o /tmp/central_probe.json -w "%{http_code}" \
+            -u "${USER}:${PASS}" \
+            "https://central.sonatype.com/api/v1/publisher/deployments")
+          echo "Central Portal probe HTTP ${code}"
+          if [[ "$code" != "200" ]]; then
+            echo "Central Portal rejected the token. Regenerate User Token at" >&2
+            echo "https://central.sonatype.com/account and update both secrets." >&2
+            head -c 300 /tmp/central_probe.json; echo >&2
+            exit 1
+          fi
+
+          {
+            echo "mavenCentralUsername=${USER}"
+            echo "mavenCentralPassword=${PASS}"
+            echo "signingInMemoryKeyPassword=${GPG_PASS}"
+          } > gradle.properties
+
+          # Multiline armored key — keep newlines; strip Windows CR only
+          printf '%s\n' "$GPG_PRIVATE_KEY" | tr -d '\r' > signing-key.asc
+          if ! grep -q "BEGIN PGP PRIVATE KEY BLOCK" signing-key.asc; then
+            echo "GPG_PRIVATE_KEY secret must be the full ASCII-armored private key" >&2
+            exit 1
+          fi
+          # Escape for gradle.properties single-line value: replace newlines with \n
+          python3 - <<'PY'
+          from pathlib import Path
+          key = Path("signing-key.asc").read_text()
+          escaped = key.replace("\\", "\\\\").replace("\n", "\\n")
+          Path("gradle.properties").write_text(
+              Path("gradle.properties").read_text() + f"signingInMemoryKey={escaped}\n"
+          )
+          PY
+
+      - name: Publish to Maven Central
         run: ./gradlew --no-daemon publishToMavenCentral
 
       - name: Commit version bump and tag

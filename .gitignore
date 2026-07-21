@@ -7,3 +7,5 @@ out/
 *.log
 .DS_Store
 .kotlin/
+gradle.properties
+signing-key.asc
