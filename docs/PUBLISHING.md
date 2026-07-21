@@ -4,16 +4,39 @@ Maintainer guide for releasing new versions of `com.plydot:plydot-pay-client`.
 
 ---
 
-## Prerequisites
+## Automatic releases (default)
 
-1. **Central Portal account** — https://central.sonatype.com/ (login with `connect@plydot.com` or your org account)
-2. **Namespace** — `com.plydot` must be registered and migrated to Central Portal
-3. **User token** — Profile → Generate User Token
-4. **GPG signing key** — Maven Central requires signed artifacts
+Every **push or merge to `main`** publishes a new patch version to Maven Central.
+
+| Event | Publishes? |
+|-------|------------|
+| Push / merge to `main` | Yes — bumps patch (`0.1.0` → `0.1.1`) and publishes |
+| Push to any other branch | No |
+| Commit message contains `[skip publish]` | No (used by the release bot itself) |
+
+Workflow: [`.github/workflows/publish.yml`](../.github/workflows/publish.yml)
+
+What it does:
+
+1. Bumps the patch version in `build.gradle.kts` (uses the higher of file version vs latest `v*` tag)
+2. Runs tests
+3. Publishes to Maven Central (Central Portal, automatic release)
+4. Commits the version bump with `[skip publish]` and pushes tag `vX.Y.Z`
+
+### Required GitHub secrets
+
+| Secret | Purpose |
+|--------|---------|
+| `MAVEN_CENTRAL_USERNAME` | Central Portal user token username |
+| `MAVEN_CENTRAL_PASSWORD` | Central Portal user token password |
+| `GPG_PRIVATE_KEY` | ASCII-armored private signing key |
+| `GPG_PASSPHRASE` | GPG key passphrase |
+
+Create the token at https://central.sonatype.com/ → Profile → Generate User Token.
 
 ---
 
-## Local credentials file
+## Manual / local publish
 
 Create `~/.config/plydot/maven-publish.env` (mode `600`):
 
@@ -24,63 +47,26 @@ GPG_KEY_ID=your_key_id
 GPG_PASSPHRASE=your_gpg_passphrase
 ```
 
-Generate a GPG key if needed:
+Bump `version` in `build.gradle.kts`, then:
 
 ```bash
-gpg --full-generate-key
-gpg --keyserver keyserver.ubuntu.com --send-keys YOUR_KEY_ID
-```
-
----
-
-## Publish manually
-
-```bash
-# bump version in build.gradle.kts first
 ./scripts/publish.sh
 ```
-
-Or directly:
-
-```bash
-export ORG_GRADLE_PROJECT_mavenCentralUsername=…
-export ORG_GRADLE_PROJECT_mavenCentralPassword=…
-export ORG_GRADLE_PROJECT_signingInMemoryKey="$(gpg --armor --export-secret-keys KEY_ID)"
-export ORG_GRADLE_PROJECT_signingInMemoryKeyPassword=…
-
-./gradlew clean build publishToMavenCentral
-```
-
-Check deployment at https://central.sonatype.com/ → Deployments.
-
-Artifacts appear on Maven Central search within ~10–30 minutes after release.
-
----
-
-## Publish via GitHub Actions
-
-1. Add repository secrets:
-   - `MAVEN_CENTRAL_USERNAME`
-   - `MAVEN_CENTRAL_PASSWORD`
-   - `GPG_PRIVATE_KEY` (ASCII-armored private key)
-   - `GPG_PASSPHRASE`
-
-2. Tag and push:
-
-```bash
-git tag v0.1.1
-git push origin v0.1.1
-```
-
-The workflow in `.github/workflows/publish.yml` runs `./gradlew publishToMavenCentral`.
 
 ---
 
 ## Versioning
 
-- Client semver tracks Pay API version (`0.1.x` ↔ `/v1`)
-- Bump `version` in `build.gradle.kts` before each release
-- Tag format: `v0.1.0`, `v0.1.1`, etc.
+- Client semver tracks Pay API major/minor (`0.1.x` ↔ `/v1`)
+- **Patch** versions are auto-bumped on every `main` publish
+- For a minor/major bump, edit `version` in `build.gradle.kts` on `main` before merging (or bump and push), e.g. `0.2.0` — the next auto release will continue from there (`0.2.1`, …)
+- Tags: `v0.1.0`, `v0.1.1`, …
+
+To skip publishing for a docs-only or chore commit on `main`:
+
+```bash
+git commit -m "docs: fix typo [skip publish]"
+```
 
 ---
 
@@ -89,5 +75,5 @@ The workflow in `.github/workflows/publish.yml` runs `./gradlew publishToMavenCe
 This repository is the **public home** for the client. The same source also lives in the internal Pay monorepo at `plydot-pay/plydot-pay-client/`. When making changes:
 
 1. Develop in the monorepo or here
-2. Keep versions in sync
-3. Publish from this repo (or monorepo via `scripts/publish-client.sh`)
+2. Keep sources in sync
+3. Publish from **this** repo via merges to `main`

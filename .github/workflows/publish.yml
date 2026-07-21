@@ -1,16 +1,29 @@
 name: Publish to Maven Central
 
+# Publishes a new Maven Central version on every push/merge to main.
+# Other branches never publish.
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
+
+concurrency:
+  group: publish-maven-central
+  cancel-in-progress: false
+
+permissions:
+  contents: write
 
 jobs:
   publish:
+    if: ${{ !contains(github.event.head_commit.message, '[skip publish]') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -18,13 +31,41 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Extract version from tag
+      - name: Bump patch version
         id: version
-        run: echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-
-      - name: Set project version
         run: |
-          sed -i "s/^version = .*/version = \"${{ steps.version.outputs.value }}\"/" build.gradle.kts
+          set -euo pipefail
+          current=$(grep -E '^version = "' build.gradle.kts | head -1 | sed -E 's/version = "([^"]+)"/\1/')
+          if [[ ! "$current" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "Unexpected version format: $current" >&2
+            exit 1
+          fi
+          major="${BASH_REMATCH[1]}"
+          minor="${BASH_REMATCH[2]}"
+          patch="${BASH_REMATCH[3]}"
+          next="${major}.${minor}.$((patch + 1))"
+
+          # Prefer next version after the latest git tag when tags exist
+          latest_tag=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1 || true)
+          if [[ -n "$latest_tag" ]]; then
+            tagged="${latest_tag#v}"
+            if [[ "$tagged" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              t_major="${BASH_REMATCH[1]}"
+              t_minor="${BASH_REMATCH[2]}"
+              t_patch="${BASH_REMATCH[3]}"
+              candidate="${t_major}.${t_minor}.$((t_patch + 1))"
+              # use the higher of build.gradle bump and tag bump
+              highest=$(printf '%s\n%s\n' "$next" "$candidate" | sort -V | tail -1)
+              next="$highest"
+            fi
+          fi
+
+          sed -i "s/^version = .*/version = \"$next\"/" build.gradle.kts
+          echo "value=$next" >> "$GITHUB_OUTPUT"
+          echo "Bumped version to $next"
+
+      - name: Run tests
+        run: ./gradlew --no-daemon clean test
 
       - name: Publish to Maven Central
         env:
@@ -32,4 +73,23 @@ jobs:
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
           ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_PRIVATE_KEY }}
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSPHRASE }}
-        run: ./gradlew publishToMavenCentral --no-daemon
+        run: ./gradlew --no-daemon publishToMavenCentral
+
+      - name: Commit version bump and tag
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add build.gradle.kts
+          if git diff --cached --quiet; then
+            echo "No version file changes to commit"
+          else
+            git commit -m "chore: release v${VERSION} [skip publish]"
+          fi
+
+          git tag -a "v${VERSION}" -m "Release v${VERSION}"
+          git push origin HEAD:main
+          git push origin "v${VERSION}"

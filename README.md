@@ -340,7 +340,7 @@ For idempotent checkout creation, pass a unique `idempotencyKey` per logical ord
 ## Further reading
 
 - [docs/INTEGRATION.md](docs/INTEGRATION.md) — full integration guide with webhook servlet example
-- [docs/PUBLISHING.md](docs/PUBLISHING.md) — Maven Central release process (maintainers)
+- [docs/PUBLISHING.md](docs/PUBLISHING.md) — Maven Central releases (auto on `main`, secrets, manual publish)
 - [Plydot Pay API docs](https://pay.plydot.dev/swagger-ui.html)
 - [Maven Central](https://central.sonatype.com/artifact/com.plydot/plydot-pay-client)
 
