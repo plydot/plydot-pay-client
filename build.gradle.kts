@@ -6,7 +6,7 @@ plugins {
 import com.vanniktech.maven.publish.SonatypeHost
 
 group = "com.plydot"
-version = "0.1.0"
+version = "0.1.2"
 
 java {
     toolchain {
