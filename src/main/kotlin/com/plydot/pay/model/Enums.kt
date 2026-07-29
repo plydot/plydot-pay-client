@@ -5,6 +5,7 @@ enum class CheckoutStatus {
     COMPLETED,
     EXPIRED,
     CANCELLED,
+    FAILED,
     REFUNDED,
 }
 

@@ -11,6 +11,8 @@ import java.time.Duration
 internal enum class HttpMethod {
     GET,
     POST,
+    PUT,
+    PATCH,
 }
 
 internal data class HttpResponseBody(
@@ -98,6 +100,11 @@ internal class JdkHttpTransport(
                 builder.header("Content-Type", "application/json")
                 val json = if (body == null) "{}" else JsonMapper.write(body)
                 builder.POST(HttpRequest.BodyPublishers.ofString(json))
+            }
+            HttpMethod.PUT, HttpMethod.PATCH -> {
+                builder.header("Content-Type", "application/json")
+                val json = if (body == null) "{}" else JsonMapper.write(body)
+                builder.method(method.name, HttpRequest.BodyPublishers.ofString(json))
             }
         }
 

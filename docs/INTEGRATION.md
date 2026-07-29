@@ -1,5 +1,7 @@
 # Integration guide
 
+> **Canonical docs:** [API Specification handbook](../../handbook/plydot-pay-api-spec-v1.0.md) — Guide § Merchant integration.
+
 Complete guide for third-party merchants using `plydot-pay-client`.
 
 ---
@@ -61,17 +63,35 @@ Never expose the API key to browsers or mobile apps. All Pay calls go through **
 
 ---
 
-## 4. Create a checkout
+## 4. Discover providers and payers
 
-When a customer starts checkout on your site, create a Pay checkout with **your product SKU**:
+Before checkout, load assigned providers with nested payers:
 
 ```kotlin
-fun startCheckout(order: Order): CreateCheckoutResponse {
+val providers = payClient.listProviders()
+// [{ code: "SANDBOX", providerId: "…", payers: [{ id, code: "MTN_MOMO", … }] }]
+
+val sandbox = providers.first { it.code == "SANDBOX" }
+val mtnPayer = sandbox.payers.first { it.code == "MTN_MOMO" }
+```
+
+Use `providerId` + `payerId` when creating the checkout. The rail is fixed for that checkout; pay only sends `payerRef` (MSISDN).
+
+---
+
+## 5. Create a checkout
+
+When a customer starts checkout on your site, create a Pay checkout with **your product SKU** and the chosen provider/payer:
+
+```kotlin
+fun startCheckout(order: Order, providerId: UUID, payerId: UUID): CreateCheckoutResponse {
     return payClient.createThirdPartyCheckout(
         ThirdPartyCheckoutRequest.builder()
             .productId(order.sku)                    // your SKU, not a Pay UUID
             .amountMinor(order.totalUgx)
             .currency("UGX")
+            .providerId(providerId)
+            .payerId(payerId)
             .customer(Customer(
                 name = order.customerName,
                 phone = order.customerPhone,
@@ -97,18 +117,15 @@ fun startCheckout(order: Order): CreateCheckoutResponse {
 
 ---
 
-## 5. Collect payment
+## 6. Collect payment
 
-When the customer chooses Mobile Money and enters their phone number:
+When the customer enters their phone number, pay with `payerRef` only (provider and payer are already on the checkout):
 
 ```kotlin
-fun collectPayment(checkoutId: UUID, phone: String, method: String): PayCheckoutResponse {
+fun collectPayment(checkoutId: UUID, phone: String): PayCheckoutResponse {
     return payClient.payCheckout(
         checkoutId,
-        PayCheckoutRequest(
-            paymentMethodCode = method,   // "MTN_MOMO" or "AIRTEL_MONEY"
-            payerRef = phone,             // e.g. "256700000099"
-        ),
+        PayCheckoutRequest(payerRef = phone),   // e.g. "256700000099"
     )
 }
 ```
@@ -119,7 +136,7 @@ Payment starts in `PENDING` or `PROCESSING`. Final state arrives via **webhook**
 
 ---
 
-## 6. Handle webhooks (recommended)
+## 7. Handle webhooks (recommended)
 
 Register `POST https://your-api.com/webhooks/plydot` in Pay.
 
@@ -172,7 +189,7 @@ Store your internal `orderId` when creating the checkout (in your DB keyed by Pa
 
 ---
 
-## 7. Poll payment status (fallback)
+## 8. Poll payment status (fallback)
 
 Use when webhooks are delayed or for a status page:
 
@@ -193,18 +210,18 @@ fun waitForPayment(paymentId: UUID, timeoutMs: Long = 120_000): PaymentResponse 
 
 ---
 
-## 8. List payment methods
+## 9. List payers (platform admin)
 
-Show available methods in your checkout UI:
+Show available rails in your checkout UI (or use `GET /v1/providers` for provider-nested discovery):
 
 ```kotlin
-val methods = payClient.listPaymentMethods()
+val payers = payClient.listPayers()
 // [{ code: "MTN_MOMO", displayName: "MTN Mobile Money", active: true }, …]
 ```
 
 ---
 
-## 9. Idempotency
+## 10. Idempotency
 
 Always pass `idempotencyKey` when creating checkouts:
 
@@ -219,7 +236,7 @@ Use your internal order ID as the key.
 
 ---
 
-## 10. Test vs live
+## 11. Test vs live
 
 | | Test | Live |
 |---|------|------|
@@ -231,7 +248,7 @@ Use test keys during development. Switch to `pk_live_` in production.
 
 ---
 
-## 11. Troubleshooting
+## 12. Troubleshooting
 
 | Problem | Fix |
 |---------|-----|
@@ -244,9 +261,11 @@ Use test keys during development. Switch to `pk_live_` in production.
 
 ---
 
-## 12. API docs
+## 13. API docs
 
-- Swagger UI: https://pay.plydot.dev/swagger-ui.html
+- Swagger UI: https://pay.plydot.com/api/swagger-ui.html
+- Scalar docs: https://pay.plydot.com/api/docs/
+- Playground: https://pay.plydot.com/api/playground/
 - Maven artifact: https://central.sonatype.com/artifact/com.plydot/plydot-pay-client
 
 For platform/admin APIs (merchant bootstrap, refund approval), use the REST API directly — they are not in this SDK v1.

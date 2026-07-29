@@ -7,9 +7,14 @@ import com.plydot.pay.model.CreateCheckoutRequest
 import com.plydot.pay.model.CreateCheckoutResponse
 import com.plydot.pay.model.PayCheckoutRequest
 import com.plydot.pay.model.PayCheckoutResponse
-import com.plydot.pay.model.PaymentMethodResponse
+import com.plydot.pay.model.CreatePayerRequest
+import com.plydot.pay.model.PayerResponse
 import com.plydot.pay.model.PaymentResponse
 import com.plydot.pay.model.PaymentStatus
+import com.plydot.pay.model.ProviderOptionResponse
+import com.plydot.pay.model.ProviderPayerAssignmentResponse
+import com.plydot.pay.model.UpdatePayerRequest
+import com.plydot.pay.model.AssignProviderPayersRequest
 import com.plydot.pay.thirdparty.ThirdPartyCheckoutRequest
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
@@ -96,8 +101,40 @@ class PlydotPayClient private constructor(
             }}",
         )
 
-    fun listPaymentMethods(): List<PaymentMethodResponse> =
-        transport.exchangeList(HttpMethod.GET, "/v1/payment-methods")
+    fun listPayers(active: Boolean? = null): List<PayerResponse> =
+        transport.exchangeList(
+            HttpMethod.GET,
+            "/v1/payers${buildQuery { active?.let { param("active", it.toString()) } }}",
+        )
+
+    fun getPayer(id: UUID): PayerResponse =
+        transport.exchange(HttpMethod.GET, "/v1/payers/$id")
+
+    fun createPayer(request: CreatePayerRequest): PayerResponse =
+        transport.exchange(HttpMethod.POST, "/v1/payers", request)
+
+    fun updatePayer(id: UUID, request: UpdatePayerRequest): PayerResponse =
+        transport.exchange(HttpMethod.PATCH, "/v1/payers/$id", request)
+
+    fun listProviderPayers(providerId: UUID): ProviderPayerAssignmentResponse =
+        transport.exchange(HttpMethod.GET, "/v1/providers/$providerId/payers")
+
+    fun assignProviderPayers(
+        providerId: UUID,
+        request: AssignProviderPayersRequest,
+    ): ProviderPayerAssignmentResponse =
+        transport.exchange(HttpMethod.PUT, "/v1/providers/$providerId/payers", request)
+
+    /** Assigned providers with nested payers (merchant) or full catalog (platform admin). */
+    fun listProviders(): List<ProviderOptionResponse> =
+        transport.exchangeList(HttpMethod.GET, "/v1/providers")
+
+    fun failCheckoutForSwitch(checkoutId: UUID, reason: String? = "PROVIDER_SWITCH"): CreateCheckoutResponse =
+        transport.exchange(
+            HttpMethod.POST,
+            "/v1/checkouts/$checkoutId/fail-for-switch",
+            mapOf("reason" to reason),
+        )
 
     class Builder {
         private var apiKey: String? = null

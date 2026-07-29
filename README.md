@@ -37,10 +37,11 @@ You need a **Plydot Pay merchant account** and an **API key** (`pk_test_…` or 
 2. Register a **webhook endpoint** in Pay (admin UI or API) so you receive `payment.succeeded` / `payment.failed`.
 3. Add this library to your backend.
 
-**Production API:** `https://pay.plydot.dev`  
-**Local Docker (dev):** `http://localhost:8044`
+**Production API:** `https://pay.plydot.com/api`  
+**Local Docker (dev):** `http://localhost:8088`
 
-API reference (OpenAPI): https://pay.plydot.dev/swagger-ui.html
+Playground: https://pay.plydot.com/api/playground/  
+API reference (Scalar): https://pay.plydot.com/api/docs/
 
 ---
 
@@ -85,12 +86,19 @@ val pay = PlydotPayClient.builder()
     .baseUrl("https://pay.plydot.dev")
     .build()
 
-// 2. Create checkout — use your own product SKU and customer details
+// 2. Discover provider + payer (or use listProviders() in your UI)
+val providers = pay.listProviders()
+val sandbox = providers.first { it.code == "SANDBOX" }
+val mtnPayer = sandbox.payers.first { it.code == "MTN_MOMO" }
+
+// 3. Create checkout — bind providerId + payerId; use your own product SKU
 val checkout = pay.createThirdPartyCheckout(
     ThirdPartyCheckoutRequest.builder()
         .productId("acme-gold-plan")
         .amountMinor(50_000)          // 50,000 UGX
         .currency("UGX")
+        .providerId(sandbox.providerId)
+        .payerId(mtnPayer.id)
         .customer(Customer(
             name = "Jane Okello",
             phone = "256700000099",
@@ -101,16 +109,13 @@ val checkout = pay.createThirdPartyCheckout(
     idempotencyKey = "order-${yourOrderId}",  // strongly recommended
 )
 
-// 3. Start payment — customer approves MoMo prompt on their phone
+// 4. Start payment — payerRef is MSISDN (rail already bound on checkout)
 val result = pay.payCheckout(
     checkout.id,
-    PayCheckoutRequest(
-        paymentMethodCode = "MTN_MOMO",   // or AIRTEL_MONEY
-        payerRef = "256700000099",        // MSISDN
-    ),
+    PayCheckoutRequest(payerRef = "256700000099"),
 )
 
-// 4. Poll until final (or wait for webhook — preferred)
+// 5. Poll until final (or wait for webhook — preferred)
 var payment = result.payment
 while (payment.status == PaymentStatus.PENDING || payment.status == PaymentStatus.PROCESSING) {
     Thread.sleep(3_000)
@@ -136,16 +141,31 @@ import com.plydot.pay.model.CreateCheckoutResponse;
 import com.plydot.pay.thirdparty.Customer;
 import com.plydot.pay.thirdparty.ThirdPartyCheckoutRequest;
 
+import com.plydot.pay.model.ProviderOptionResponse;
+import java.util.UUID;
+
 PlydotPayClient pay = PlydotPayClient.builder()
     .apiKey("pk_test_your_key_here")
     .baseUrl("https://pay.plydot.dev")
     .build();
 
+ProviderOptionResponse sandbox = pay.listProviders().stream()
+    .filter(p -> "SANDBOX".equals(p.getCode()))
+    .findFirst()
+    .orElseThrow();
+UUID payerId = sandbox.getPayers().stream()
+    .filter(p -> "MTN_MOMO".equals(p.getCode()))
+    .findFirst()
+    .orElseThrow()
+    .getId();
+
 CreateCheckoutResponse checkout = pay.createThirdPartyCheckout(
     ThirdPartyCheckoutRequest.builder()
         .productId("acme-gold-plan")
-        .amountMinor(50_000L)
+        .amountMinor(50000L)
         .currency("UGX")
+        .providerId(sandbox.getProviderId())
+        .payerId(payerId)
         .customer(new Customer("Jane Okello", "256700000099", "jane@example.com"))
         .description("Gold plan subscription")
         .build(),
@@ -154,7 +174,7 @@ CreateCheckoutResponse checkout = pay.createThirdPartyCheckout(
 
 PayCheckoutResponse result = pay.payCheckout(
     checkout.getId(),
-    new PayCheckoutRequest("MTN_MOMO", "256700000099")
+    new PayCheckoutRequest("256700000099")
 );
 ```
 
@@ -165,9 +185,10 @@ PayCheckoutResponse result = pay.payCheckout(
 ```text
 Your app                         Plydot Pay                    MoMo network
    |                                 |                              |
-   |-- createThirdPartyCheckout() -->|                              |
-   |<-- checkout (PENDING) ----------|                              |
-   |-- payCheckout(MTN_MOMO) ------->|---- collect request -------->|
+   |-- listProviders() --------------->|
+   |-- createThirdPartyCheckout() ---->|  (providerId + payerId)
+   |<-- checkout (PENDING) ----------|
+   |-- payCheckout(payerRef) -------->|---- collect request -------->|
    |<-- payment (PENDING) -----------|                              |
    |                                 |<---- customer approves ------|
    |<-- webhook payment.succeeded ---|                              |
@@ -192,6 +213,8 @@ As a third-party integrator you **do not** use Pay's product catalog. You send y
 | `currency` | Yes | e.g. `UGX` |
 | `customer.name` | Yes | End customer name |
 | `customer.phone` and/or `email` | Yes | At least one contact field |
+| `providerId` | Yes | From `listProviders()` |
+| `payerId` | Yes | Nested payer UUID under that provider |
 | `accountRef` | No | **Ignored** — Pay sets this to your merchant code |
 
 Use `ThirdPartyCheckoutRequest` — it validates customer fields **before** calling the API.
@@ -223,11 +246,18 @@ PlydotPayClient.builder()
 | `cancelCheckout(checkoutId)` | Cancel a pending checkout |
 | `getPayment(id)` | Get payment status |
 | `listPayments(status?, …)` | List payments |
-| `listPaymentMethods()` | List available methods (`MTN_MOMO`, `AIRTEL_MONEY`, …) |
+| `listProviders()` | Discovery: providers with nested payers |
+| `listPayers(active?)` | Flat payer catalog (`GET /v1/payers`) |
+| `getPayer(id)` | Get one payer |
+| `createPayer(request)` | Create payer (platform admin) |
+| `updatePayer(id, request)` | Update payer (platform admin) |
+| `listProviderPayers(providerId)` | Provider↔payer links |
+| `assignProviderPayers(providerId, request)` | Replace provider↔payer links |
+| `failCheckoutForSwitch(checkoutId, reason?)` | Fail checkout for provider switch |
 
-### Payment method codes
+### Choosing a payer
 
-Call `listPaymentMethods()` for the current list. Common values:
+Merchants typically call `listProviders()` and let the customer pick a provider + payer (e.g. SANDBOX + MTN_MOMO). Pass those UUIDs on checkout create; `payCheckout` only needs `payerRef` (MSISDN).
 
 - `MTN_MOMO` — MTN Mobile Money (Uganda)
 - `AIRTEL_MONEY` — Airtel Money (Uganda)
@@ -341,7 +371,8 @@ For idempotent checkout creation, pass a unique `idempotencyKey` per logical ord
 
 - [docs/INTEGRATION.md](docs/INTEGRATION.md) — full integration guide with webhook servlet example
 - [docs/PUBLISHING.md](docs/PUBLISHING.md) — Maven Central releases (auto on `main`, secrets, manual publish)
-- [Plydot Pay API docs](https://pay.plydot.dev/swagger-ui.html)
+- [Plydot Pay API docs](https://pay.plydot.com/api/docs/)
+- [Playground](https://pay.plydot.com/api/playground/)
 - [Maven Central](https://central.sonatype.com/artifact/com.plydot/plydot-pay-client)
 
 ---

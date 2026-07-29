@@ -126,6 +126,8 @@ class PlydotPayClientTest {
                     .productId("acme-sku")
                     .amountMinor(50_000)
                     .currency("UGX")
+                    .providerId(UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"))
+                    .payerId(UUID.fromString("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"))
                     .customer(Customer("Jane Okello", phone = "256700000099"))
                     .description("Gold plan")
                     .build(),
@@ -138,7 +140,7 @@ class PlydotPayClientTest {
         val pay =
             client.payCheckout(
                 checkoutId,
-                PayCheckoutRequest(paymentMethodCode = "MTN_MOMO", payerRef = "256700000099"),
+                PayCheckoutRequest(payerRef = "256700000099"),
             )
         assertEquals(PaymentStatus.PENDING, pay.payment.status)
 
