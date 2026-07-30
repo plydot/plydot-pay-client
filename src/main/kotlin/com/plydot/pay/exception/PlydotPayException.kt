@@ -25,4 +25,12 @@ class PlydotPayException(
     fun isForbidden(): Boolean = code == "FORBIDDEN"
 
     fun isNotFound(): Boolean = code.endsWith("_NOT_FOUND") || code == "NOT_FOUND"
+
+    fun isMerchantContextRequired(): Boolean = code == "MERCHANT_CONTEXT_REQUIRED"
+
+    fun isInsufficientBalance(): Boolean = code == "INSUFFICIENT_BALANCE"
+
+    fun isPayoutAlreadyOpen(): Boolean = code == "PAYOUT_ALREADY_OPEN"
+
+    fun isPayoutAccountNotConfigured(): Boolean = code == "PAYOUT_ACCOUNT_NOT_FOUND"
 }

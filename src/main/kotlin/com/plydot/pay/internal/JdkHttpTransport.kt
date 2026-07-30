@@ -23,6 +23,7 @@ internal data class HttpResponseBody(
 internal class JdkHttpTransport(
     private val baseUrl: String,
     private val apiKey: String,
+    private val defaultAccessToken: String? = null,
     connectTimeout: Duration,
     private val readTimeout: Duration,
 ) {
@@ -36,21 +37,24 @@ internal class JdkHttpTransport(
         path: String,
         body: Any? = null,
         idempotencyKey: String? = null,
-    ): T = exchange(method, path, body, idempotencyKey, T::class.java)
+        bearerToken: String? = null,
+    ): T = exchange(method, path, body, idempotencyKey, bearerToken, T::class.java)
 
     inline fun <reified T> exchangeList(
         method: HttpMethod,
         path: String,
-    ): List<T> = exchangeList(method, path, T::class.java)
+        bearerToken: String? = null,
+    ): List<T> = exchangeList(method, path, bearerToken, T::class.java)
 
     fun <T> exchange(
         method: HttpMethod,
         path: String,
         body: Any? = null,
         idempotencyKey: String? = null,
+        bearerToken: String? = null,
         responseType: Class<T>,
     ): T {
-        val response = rawExchange(method, path, body, idempotencyKey)
+        val response = rawExchange(method, path, body, idempotencyKey, bearerToken)
         if (response.statusCode in 200..299) {
             return if (response.body.isBlank()) {
                 throw IllegalStateException("Expected response body for $method $path")
@@ -64,9 +68,10 @@ internal class JdkHttpTransport(
     fun <T> exchangeList(
         method: HttpMethod,
         path: String,
+        bearerToken: String? = null,
         responseType: Class<T>,
     ): List<T> {
-        val response = rawExchange(method, path)
+        val response = rawExchange(method, path, bearerToken = bearerToken)
         if (response.statusCode in 200..299) {
             return JsonMapper.mapper.readValue(
                 response.body,
@@ -81,13 +86,14 @@ internal class JdkHttpTransport(
         path: String,
         body: Any? = null,
         idempotencyKey: String? = null,
+        bearerToken: String? = null,
     ): HttpResponseBody {
         val uri = URI.create(normalizeBaseUrl(baseUrl) + path)
         val builder =
             HttpRequest.newBuilder()
                 .uri(uri)
                 .timeout(readTimeout)
-                .header("Authorization", "Bearer $apiKey")
+                .header("Authorization", "Bearer ${resolveBearerToken(bearerToken)}")
                 .header("Accept", "application/json")
 
         if (idempotencyKey != null) {
@@ -111,6 +117,11 @@ internal class JdkHttpTransport(
         val httpResponse = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString())
         return HttpResponseBody(httpResponse.statusCode(), httpResponse.body())
     }
+
+    private fun resolveBearerToken(override: String?): String =
+        override?.takeIf { it.isNotBlank() }
+            ?: defaultAccessToken?.takeIf { it.isNotBlank() }
+            ?: apiKey
 
     private fun toException(response: HttpResponseBody): PlydotPayException {
         val error =

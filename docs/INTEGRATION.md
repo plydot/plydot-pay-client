@@ -261,7 +261,101 @@ Use test keys during development. Switch to `pk_live_` in production.
 
 ---
 
-## 13. API docs
+## 13. Merchant settlement payouts
+
+After live Yo payments succeed, merchants can request settlement (bank/MoMo payout). Plydot verifies each payment with Yo asynchronously, then ops completes the bank transfer.
+
+### Auth
+
+| Operation | Credential |
+|-----------|------------|
+| Balance, list/get payout, payout account | Merchant API key (`pk_…`) |
+| Submit payout | **Merchant admin JWT** (`MERCHANT_ADMIN`) |
+
+Obtain a JWT with `PlydotPayClient.obtainAccessToken` or your own Keycloak integration:
+
+```kotlin
+val token = PlydotPayClient.obtainAccessToken(
+    baseUrl = "https://pay.plydot.com/api",
+    username = "merchant.admin",
+    password = merchantAdminPassword,
+).accessToken
+```
+
+The Keycloak user must include merchant context (`merchant_code` or `merchant_id` attribute).
+
+### Workflow (Kotlin)
+
+```kotlin
+val pay = PlydotPayClient.builder()
+    .apiKey("pk_live_…")
+    .baseUrl("https://pay.plydot.com/api")
+    .build()
+
+val merchantId = UUID.fromString("…") // your Pay merchant UUID
+val token = PlydotPayClient.obtainAccessToken(
+    baseUrl = "https://pay.plydot.com/api",
+    username = "merchant.admin",
+    password = System.getenv("MERCHANT_ADMIN_PASSWORD"),
+).accessToken
+
+val settlements = pay.settlementWorkflow(token, merchantId)
+
+// 1. Check balance (live Yo-verified payments only; SANDBOX excluded)
+val balance = settlements.getBalance()
+require(balance.availableMinor > 0) { "Nothing to settle" }
+
+// 2. Confirm payout destination (configured by Plydot platform admin)
+val account = settlements.getPayoutAccount()
+
+// 3. Submit payout — omit amount to settle full available balance
+val payout = settlements.submitFullBalance()
+// status: PENDING_VERIFICATION → VERIFYING → VERIFIED | VERIFICATION_FAILED
+
+// 4. Poll until Yo verification completes
+val verified = settlements.waitForPayout(payout.id)
+when (verified.status) {
+    SettlementPayoutStatus.VERIFIED ->
+        println("Payout verified; Plydot ops will transfer ${verified.amountMinor} ${verified.currency}")
+    SettlementPayoutStatus.VERIFICATION_FAILED ->
+        error("Verification failed: ${verified.failureReason}")
+    else -> Unit
+}
+```
+
+### Low-level API
+
+```kotlin
+pay.getSettlementBalance()
+pay.getPayoutAccount(merchantId)
+pay.submitPayoutRequest(SubmitPayoutRequest(amountMinor = 50_000), merchantAccessToken = token)
+pay.getPayoutRequest(payoutId)
+pay.listPayoutRequests(status = SettlementPayoutStatus.VERIFIED)
+pay.waitForPayoutRequest(payoutId)
+```
+
+### Webhooks
+
+| Event | When |
+|-------|------|
+| `settlement.verified` | All payout items passed Yo re-verification |
+| `settlement.paid` | Platform marked bank transfer complete |
+
+Bank transfer progress (`IN_PROGRESS` → `COMPLETED`) is platform-admin only and not in this SDK.
+
+### Settlement troubleshooting
+
+| Problem | Fix |
+|---------|-----|
+| `MERCHANT_CONTEXT_REQUIRED` | Set Keycloak `merchant_code` / `merchant_id`; fetch new JWT |
+| Access denied on submit | Use merchant admin JWT, not API key |
+| Stuck `PENDING_VERIFICATION` | Wait for async verify; ops can retry via admin API |
+| `PAYOUT_ACCOUNT_NOT_FOUND` | Platform admin must configure payout account |
+| `INSUFFICIENT_BALANCE` | No live Yo-verified balance (SANDBOX excluded) |
+
+---
+
+## 14. API docs
 
 - Swagger UI: https://pay.plydot.com/api/swagger-ui.html
 - Scalar docs: https://pay.plydot.com/api/docs/

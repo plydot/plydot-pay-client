@@ -254,6 +254,18 @@ PlydotPayClient.builder()
 | `listProviderPayers(providerId)` | Provider↔payer links |
 | `assignProviderPayers(providerId, request)` | Replace provider↔payer links |
 | `failCheckoutForSwitch(checkoutId, reason?)` | Fail checkout for provider switch |
+| `getSettlementBalance(merchantId?)` | Available settlement balance |
+| `getPayoutAccount(merchantId)` | Configured payout destination |
+| `submitPayoutRequest(request?, merchantAccessToken?)` | Submit payout (merchant admin JWT) |
+| `getPayoutRequest(id)` | Get payout by ID |
+| `listPayoutRequests(merchantId?, status?, …)` | List payout requests |
+| `waitForPayoutRequest(id, timeout?, …)` | Poll until verified/failed |
+| `settlementWorkflow(token, merchantId)` | Convenience wrapper for settlement flow |
+| `PlydotPayClient.obtainAccessToken(…)` | Exchange username/password for JWT |
+
+### Settlement workflow
+
+See [docs/INTEGRATION.md](docs/INTEGRATION.md#14-merchant-settlement-payouts) for balance → submit → poll examples and webhook events (`settlement.verified`, `settlement.paid`).
 
 ### Choosing a payer
 
@@ -358,10 +370,11 @@ Common error codes:
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `baseUrl` | `https://pay.plydot.dev` | Pay API base URL |
+| `accessToken` | — | Optional merchant admin JWT (settlement submit) |
 | `connectTimeout` | 5 seconds | TCP connect timeout |
 | `readTimeout` | 30 seconds | HTTP read timeout |
 
-Authentication is always `Authorization: Bearer {apiKey}`.
+Authentication is `Authorization: Bearer {apiKey}` by default. Pass [merchantAccessToken] on [submitPayoutRequest] or set `accessToken` on the builder for JWT calls.
 
 For idempotent checkout creation, pass a unique `idempotencyKey` per logical order (e.g. your order ID). Retries with the same key return the original response.
 
